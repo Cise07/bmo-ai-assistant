@@ -104,4 +104,3 @@ When using this project, ensure compliance with:
 - MIT License for borrowed assets from `be-more-agent`
 
 ---
-*BMO is alive! Never hit it with a stick.*
