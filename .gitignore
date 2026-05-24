@@ -1,0 +1,74 @@
+# Virtual Environment
+virtual/
+venv/
+env/
+ENV/
+.venv
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Audio recordings and temporary audio files
+recs/
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+recordings/
+temp_audio/
+
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# OS-specific files
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Local configuration files
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Model files 
+# Note: Whisper, Piper, and Gemma models are stored system-wide (not in repo)
+models/
+.cache/
+ollama_models/
+*.onnx
+*.bin
+*.pt
+*.pth
+
+# System files
+.directory
+.Spotlight-V100
+.Trashes

@@ -1,0 +1,16 @@
+{
+    "MODEL_OLLAMA": "gemma3:4b",
+    "WAKE_WORD": "bmo",
+    "PIPER_PATH": "C:/piper/piper.exe",
+    "PIPER_MODEL": "C:/piper/it_IT-paola-medium.onnx",
+    "WHISPER_MODEL_TYPE": "small",
+    "BASE_FACES_PATH": "./faces",
+    "OUTPUT_WAV": "recs/bmo_voice.wav",
+    "TEMP_INPUT_WAV": "recs/temp_audio.wav",
+    "FOLDER_NAMES": {
+        "IDLE": "idle",
+        "LISTENING": "listening",
+        "THINKING": "thinking",
+        "SPEAKING": "speaking"
+    }
+}

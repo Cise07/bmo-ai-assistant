@@ -1,0 +1,107 @@
+# BMO AI Assistant 🤖 ✨
+
+BMO is an advanced interactive voice assistant inspired by the character from *Adventure Time*. It is designed to operate almost entirely **offline**, guaranteeing privacy, data security, and low-latency responses.
+
+> [!WARNING]
+> **Work in Progress**: This project is currently under active development. It is currently **functional on Windows PCs** and will be ported to **Raspberry Pi 5** in future releases. Features may change as development progresses , the body has not been printed yet.
+
+> [!IMPORTANT]
+> **Privacy & Local Computing**: All models (AI Intelligence, Voice-to-Text, and Text-to-Speech) run **locally on your machine**. The only exception is the web search function, which activates exclusively to retrieve real-time data or fill information gaps on current topics.
+
+## 🚀 Key Features
+
+- **Local Execution**: Leverage your hardware's power to run LLMs and Speech-to-Text without sending audio data to external servers.
+- **Dynamic Graphical Interface**: A Pygame window displaying BMO's expressions (Idle, Listening, Thinking, Speaking) synchronized with its operational state.
+- **Voice Recognition (STT)**: Based on **OpenAI Whisper**, optimized for accurate Italian transcription.
+- **AI Brain**: Powered by **Gemma 3 (4b)** via Ollama, configured with a specific personality system.
+- **Voice Synthesis (TTS)**: Uses **Piper**, an ultra-fast neural engine for fluid and reactive speech.
+- **Predictive Web Search**: If BMO detects a question about current events or general knowledge, it automatically queries **DuckDuckGo** to provide accurate answers.
+
+## 🛠️ Technology Stack and Libraries
+
+| Library | Model / Purpose | Execution |
+| :--- | :--- | :--- |
+| `whisper` | OpenAI Whisper (Small) | **Local** |
+| `ollama` | Gemma 3 (4b) | **Local** |
+| `piper` | it_IT-paola-medium | **Local** |
+| `ddgs` | DuckDuckGo Search | Cloud |
+| `pygame` | GUI & Audio Mixer | **Local** |
+| `speech_recognition` | Audio Input Stream | **Local** |
+
+## ⚙️ How It Works
+
+1. **Monitoring**: The system remains in `IDLE` state. Whisper continuously monitors ambient audio for the **Wake Word** ("BMO").
+2. **Interception and Analysis**: Once activated, BMO listens to the complete question. The system analyzes in real-time whether the request involves:
+   - **Date/Time**: Responds using the system clock (no external search).
+   - **Web Search**: If the question contains keywords like "who", "what", "weather", "news", or other terms requiring current information, it queries DuckDuckGo.
+3. **Reasoning**: Data obtained from the search (if necessary) is passed to Gemma 3 as enriched context. If the model lacks sufficient information, the system attempts a second automatic search fallback.
+4. **Synthesized Response**: The generated text is converted to audio by Piper and played while the GUI animates BMO in `SPEAKING` state with lip-sync.
+
+## 📁 System Requirements
+
+- **Ollama**: Model `gemma3:4b` installed.
+- **Piper TTS**: `piper.exe` file and `.onnx` model configured in the correct paths.
+- **Faces Folder**: A folder structure containing animation frames:
+  - `./faces/idle/`
+  - `./faces/listening/`
+  - `./faces/thinking/`
+  - `./faces/speaking/`
+- **Whisper**: Open Ai `Whisper` model installed.
+## 🖥️ Real-time Debugging
+To facilitate development, the code prints to the terminal every phase of the process:
+- `[DEBUG AUDIO]`: Shows exactly what Whisper understood from your words.
+- `🔍 BMO is consulting...`: Indicates when the assistant is accessing the network to search for information.
+- `BMO: [Response]`: Shows the text output from the AI.
+
+## 📦 External Assets
+
+This project uses only minimal external assets from [`be-more-agent`](https://github.com/brenpoly/be-more-agent):
+- **Face Images**: Animation frames for BMO's expressions (idle, listening, thinking, speaking)
+- **3D Models**: 3D printable models for physical BMO construction *(Note: 3D models are not yet utilized, as the physical body has not been printed yet)*
+
+**All other components are original:**
+- ✅ **Code**: Written from scratch
+- ✅ **Architecture**: Designed from scratch
+- ✅ **AI Integration**: Ollama + Gemma 3, Whisper, Piper - custom implementation
+- ✅ **Web Search Logic**: Custom implementation
+- ✅ **GUI System**: Custom Pygame implementation with state synchronization
+
+## 🙏 Credits and Acknowledgments
+
+This project uses only the face image assets and 3D models from [`be-more-agent`](https://github.com/brenpoly/be-more-agent) by [brenpoly](https://github.com/brenpoly). All code, architecture decisions, and technical implementation are original work created independently from scratch.
+
+---
+
+## 📜 License & Attribution
+
+This project is released under the **MIT License**.
+
+### Third-Party Dependencies
+
+This project uses the following open-source libraries and models:
+
+| Component | License | Purpose |
+| :--- | :--- | :--- |
+| **OpenAI Whisper** | MIT | Speech-to-Text engine |
+| **Ollama** | MIT | LLM runtime and inference |
+| **Gemma 3** | Google Terms | Language model |
+| **Piper TTS** | MIT | Text-to-Speech synthesis |
+| **Pygame** | LGPL | Graphics and audio rendering |
+| **DuckDuckGo Search** | Proprietary | Web search results |
+| **SpeechRecognition** | BSD-3-Clause | Audio input stream handling |
+
+### Asset Attribution
+
+- **Face Images**: Sourced from [`be-more-agent`](https://github.com/brenpoly/be-more-agent) by [brenpoly](https://github.com/brenpoly), used under the MIT License.
+- **3D Models** (.obj, .stl, and other 3D modeling files): Sourced from [`be-more-agent`](https://github.com/brenpoly/be-more-agent) by [brenpoly](https://github.com/brenpoly), licensed under the **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC-BY-NC-SA 4.0)**.
+
+### Compliance Notes
+
+When using this project, ensure compliance with:
+- MIT License for original code and direct dependencies
+- Respective model licenses (Gemma 3, Whisper, Piper)
+- Third-party service terms (DuckDuckGo)
+- MIT License for borrowed assets from `be-more-agent`
+
+---
+*BMO is alive! Never hit it with a stick.*
