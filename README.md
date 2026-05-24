@@ -70,6 +70,10 @@ This project uses only minimal external assets from [`be-more-agent`](https://gi
 
 This project uses only the face image assets and 3D models from [`be-more-agent`](https://github.com/brenpoly/be-more-agent) by [brenpoly](https://github.com/brenpoly). All code, architecture decisions, and technical implementation are original work created independently from scratch.
 
+### Disclaimer
+>[!IMPORTANT]
+>**This is a fan creation.** BMO and Adventure Time are properties of **Cartoon Network**. This project is not affiliated with, endorsed by, or associated with Cartoon Network or any of its parent companies. This project is created for educational and personal use only.
+
 ---
 
 ## 📜 License & Attribution
