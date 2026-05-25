@@ -48,6 +48,10 @@ BMO is an advanced interactive voice assistant inspired by the character from *A
   - `./faces/speaking/`
 - **Whisper**: Open Ai `Whisper` model installed.
 ## 🖥️ Real-time Debugging
+
+BMO uses your default audio device set in windows , but if for any reason it doesn't detect 
+it you can run the `mic-check.py` script to find out your mic index and set it manually;
+ 
 To facilitate development, the code prints to the terminal every phase of the process:
 - `[DEBUG AUDIO]`: Shows exactly what Whisper understood from your words.
 - `🔍 BMO is consulting...`: Indicates when the assistant is accessing the network to search for information.
