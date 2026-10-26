@@ -11,7 +11,8 @@ BMO is an advanced interactive voice assistant inspired by the character from *A
 ## 🚀 Key Features
 
 - **Local Execution**: Leverage your hardware's power to run LLMs and Speech-to-Text without sending audio data to external servers.
-- **Dynamic Graphical Interface**: A Pygame window displaying BMO's expressions (Idle, Listening, Thinking, Speaking) synchronized with its operational state.
+- **Dynamic Graphical Interface**: A Pygame window styled with BMO's retro console bezel and synchronized facial animations (Idle with sleeping Zzz, Listening, Thinking with animated question marks, Speaking with lip-sync).
+- **Dual Interaction Mode**: Interact by speaking (voice wake-word or graphical 'Sveglia BMO' button) or by typing directly into the integrated text input bar.
 - **Voice Recognition (STT)**: Based on **OpenAI Whisper**, optimized for accurate Italian transcription.
 - **AI Brain**: Powered by **Gemma 3 (4b)** via Ollama, configured with a specific personality system.
 - **Voice Synthesis (TTS)**: Uses **Piper**, an ultra-fast neural engine for fluid and reactive speech.
@@ -53,22 +54,16 @@ To facilitate development, the code prints to the terminal every phase of the pr
 - `🔍 BMO is consulting...`: Indicates when the assistant is accessing the network to search for information.
 - `BMO: [Response]`: Shows the text output from the AI.
 
-## 📦 External Assets
+## 📦 Assets
 
-This project uses only minimal external assets from [`be-more-agent`](https://github.com/brenpoly/be-more-agent):
-- **Face Images**: Animation frames for BMO's expressions (idle, listening, thinking, speaking)
-- **3D Models**: 3D printable models for physical BMO construction *(Note: 3D models are not yet utilized, as the physical body has not been printed yet)*
-
-**All other components are original:**
+**All original components:**
 - ✅ **Code**: Written from scratch
+- ✅ **Face Images & Animations**: 100% original custom artwork with retro console frame
 - ✅ **Architecture**: Designed from scratch
 - ✅ **AI Integration**: Ollama + Gemma 3, Whisper, Piper - custom implementation
 - ✅ **Web Search Logic**: Custom implementation
-- ✅ **GUI System**: Custom Pygame implementation with state synchronization
+- ✅ **GUI System**: Custom Pygame implementation with interactive text bar and wake button
 
-## 🙏 Credits and Acknowledgments
-
-This project uses only the face image assets and 3D models from [`be-more-agent`](https://github.com/brenpoly/be-more-agent) by [brenpoly](https://github.com/brenpoly). All code, architecture decisions, and technical implementation are original work created independently from scratch.
 
 ### Disclaimer
 >[!IMPORTANT]
@@ -94,10 +89,6 @@ This project uses the following open-source libraries and models:
 | **DuckDuckGo Search** | Proprietary | Web search results |
 | **SpeechRecognition** | BSD-3-Clause | Audio input stream handling |
 
-### Asset Attribution
-
-- **Face Images**: Sourced from [`be-more-agent`](https://github.com/brenpoly/be-more-agent) by [brenpoly](https://github.com/brenpoly), used under the MIT License.
-- **3D Models** (.obj, .stl, and other 3D modeling files): Sourced from [`be-more-agent`](https://github.com/brenpoly/be-more-agent) by [brenpoly](https://github.com/brenpoly), licensed under the **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC-BY-NC-SA 4.0)**.
 
 ### Compliance Notes
 
@@ -105,6 +96,5 @@ When using this project, ensure compliance with:
 - MIT License for original code and direct dependencies
 - Respective model licenses (Gemma 3, Whisper, Piper)
 - Third-party service terms (DuckDuckGo)
-- MIT License for borrowed assets from `be-more-agent`
 
 ---
