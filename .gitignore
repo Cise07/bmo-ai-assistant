@@ -72,3 +72,6 @@ ollama_models/
 .directory
 .Spotlight-V100
 .Trashes
+
+# Backup folders
+bmo-old-backup/

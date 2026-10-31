@@ -7,6 +7,9 @@
     "BASE_FACES_PATH": "./faces",
     "OUTPUT_WAV": "recs/bmo_voice.wav",
     "TEMP_INPUT_WAV": "recs/temp_audio.wav",
+    "MAX_HISTORY_TURNS": 6,
+    "MAX_RESPONSE_WORDS": 15,
+    "AUDIO_VOLUME": 1.0,
     "FOLDER_NAMES": {
         "IDLE": "idle",
         "LISTENING": "listening",
