@@ -1,8 +1,8 @@
 {
     "MODEL_OLLAMA": "gemma3:4b",
     "WAKE_WORD": "bmo",
-    "PIPER_PATH": "C:/piper/piper.exe",
-    "PIPER_MODEL": "C:/piper/it_IT-paola-medium.onnx",
+    "PIPER_PATH": "./piper/piper.exe",
+    "PIPER_MODEL": "./piper/it_IT-paola-medium.onnx",
     "WHISPER_MODEL_TYPE": "small",
     "BASE_FACES_PATH": "./faces",
     "OUTPUT_WAV": "recs/bmo_voice.wav",

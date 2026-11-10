@@ -1,9 +1,33 @@
-# Virtual Environment
+# Virtual Environment (includes openai-whisper and all Python packages)
 virtual/
 venv/
 env/
 ENV/
-.venv
+.venv/
+
+# Local Piper TTS installation & voice models
+piper/
+models/
+ollama_models/
+.cache/
+*.onnx
+*.onnx.json
+*.ort
+*.bin
+*.pt
+*.pth
+
+# Logs, audio recordings and temporary audio files
+logs/
+recs/
+recordings/
+temp_audio/
+*.log
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
 
 # Python cache and compiled files
 __pycache__/
@@ -16,62 +40,34 @@ dist/
 build/
 *.egg
 
-# Audio recordings and temporary audio files
-recs/
-*.wav
-*.mp3
-*.flac
-*.ogg
-*.m4a
-recordings/
-temp_audio/
-
 # IDE and Editor
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-.DS_Store
 .project
 .pydevproject
 .settings/
 *.sublime-project
 *.sublime-workspace
 
-# OS-specific files
+# OS-specific & temporary files
 Thumbs.db
 .DS_Store
 .AppleDouble
 .LSOverride
-
-# Local configuration files
-.env
-.env.local
-
-# Temporary files
+.directory
+.Spotlight-V100
+.Trashes
 *.tmp
 *.temp
-*.log
 *.cache
 .pytest_cache/
 .coverage
 htmlcov/
 
-# Model files 
-# Note: Whisper, Piper, and Gemma models are stored system-wide (not in repo)
-models/
-.cache/
-ollama_models/
-*.onnx
-*.bin
-*.pt
-*.pth
-
-# System files
-.directory
-.Spotlight-V100
-.Trashes
-
-# Backup folders
+# Local configuration overrides & backups
+.env
+.env.local
 bmo-old-backup/

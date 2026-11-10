@@ -18,14 +18,37 @@ from PIL import Image, ImageDraw
 # LOGGING
 # ===========================================================================
 os.makedirs("logs", exist_ok=True)
+os.system("")  # Enable ANSI escape sequences in Windows terminal
+
+
+class ColoredConsoleFormatter(logging.Formatter):
+    RESET      = "\033[0m"
+    BMO_COLOR  = "\033[1;96m"  # Bright cyan for BMO phrases
+    USER_COLOR = "\033[1;93m"  # Bright yellow for transcriptions / user input
+
+    _BMO_PREFIXES  = ("Risposta BMO:", "BMO pronuncia:")
+    _USER_PREFIXES = ("Whisper →", "Domanda ricevuta:", "Input testuale:")
+
+    def format(self, record: logging.LogRecord) -> str:
+        formatted = super().format(record)
+        msg = record.getMessage()
+        if msg.startswith(self._BMO_PREFIXES):
+            return f"{self.BMO_COLOR}{formatted}{self.RESET}"
+        if msg.startswith(self._USER_PREFIXES):
+            return f"{self.USER_COLOR}{formatted}{self.RESET}"
+        return formatted
+
+
+_log_fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+_file_handler = logging.FileHandler(os.path.join("logs", "bmo.log"), encoding="utf-8")
+_file_handler.setFormatter(logging.Formatter(_log_fmt))
+
+_stream_handler = logging.StreamHandler()
+_stream_handler.setFormatter(ColoredConsoleFormatter(_log_fmt))
 
 logging.basicConfig(
     level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler(os.path.join("logs", "bmo.log"), encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
+    handlers=[_file_handler, _stream_handler],
 )
 log = logging.getLogger("BMO")
 
@@ -45,8 +68,8 @@ class BMOConfig:
     _DEFAULTS: dict = {
         "MODEL_OLLAMA": "gemma3:4b",
         "WAKE_WORD": "bmo",
-        "PIPER_PATH": "C:/piper/piper.exe",
-        "PIPER_MODEL": "C:/piper/it_IT-paola-medium.onnx",
+        "PIPER_PATH": "./piper/piper.exe",
+        "PIPER_MODEL": "./piper/it_IT-paola-medium.onnx",
         "WHISPER_MODEL_TYPE": "small",
         "BASE_FACES_PATH": "./faces",
         "OUTPUT_WAV": "recs/bmo_voice.wav",
@@ -123,9 +146,9 @@ class BMOState:
         self._lock = threading.Lock()
         self._state: str = IDLE
         self._is_busy: bool = False
-        # Event che il GUI thread setta per interrompere il TTS (#14)
+        # Event set by the GUI thread to interrupt TTS (#14)
         self._stop_speaking = threading.Event()
-        # Cronologia conversazione rolling (#6)
+        # Rolling conversation history (#6)
         self._history: list[dict] = []
 
     # --- current state ---
@@ -164,7 +187,7 @@ class BMOState:
     # --- conversation history (#6) ---
     def add_to_history(self, role: str, content: str, max_turns: int) -> None:
         self._history.append({"role": role, "content": content})
-        # Mantieni solo gli ultimi max_turns turni (ogni turno = 1 user + 1 assistant)
+        # Keep only the last max_turns turns (each turn = 1 user + 1 assistant)
         cap = max_turns * 2
         if len(self._history) > cap:
             self._history = self._history[-cap:]
@@ -210,7 +233,7 @@ BTN_MIC_REC_SHADOW  = (180, 40, 40)
 BTN_MIC_BUSY        = (130, 155, 150)
 BTN_MIC_BUSY_SHADOW = (100, 125, 120)
 
-BTN_MIC_STOP        = (200, 40, 40)   # rosso scuro → STOP durante SPEAKING
+BTN_MIC_STOP        = (200, 40, 40)   # dark red → STOP during SPEAKING
 BTN_MIC_STOP_SHADOW = (140, 20, 20)
 
 
@@ -332,6 +355,7 @@ def speak_with_piper(text: str, state: BMOState, config: BMOConfig) -> None:
     if not text.strip():
         return
 
+    log.debug(f"BMO pronuncia: {text!r}")
     state.clear_stop_speaking()
     previous_state = state.state
     state.state = SPEAKING
@@ -663,7 +687,7 @@ def window_thread(
 
         # ── Mic / Stop button ──────────────────────────────────────────────
         if cur_state == SPEAKING:
-            # (#14) Bottone diventa STOP
+            # (#14) Button becomes STOP
             m_bg     = BTN_MIC_STOP
             m_shadow = BTN_MIC_STOP_SHADOW
         elif cur_state == LISTENING:
