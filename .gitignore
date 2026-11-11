@@ -22,6 +22,7 @@ ollama_models/
 # Logs, audio recordings and temporary audio files
 logs/
 recs/
+assets/recs/
 recordings/
 temp_audio/
 *.log

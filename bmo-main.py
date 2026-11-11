@@ -82,9 +82,9 @@ class BMOConfig:
         "PIPER_PATH": "./piper/piper.exe",
         "PIPER_MODEL": "./piper/it_IT-paola-medium.onnx",
         "WHISPER_MODEL_TYPE": "small",
-        "BASE_FACES_PATH": "./faces",
-        "OUTPUT_WAV": "recs/bmo_voice.wav",
-        "TEMP_INPUT_WAV": "recs/temp_audio.wav",
+        "BASE_FACES_PATH": "./assets/faces",
+        "OUTPUT_WAV": "assets/recs/bmo_voice.wav",
+        "TEMP_INPUT_WAV": "assets/recs/temp_audio.wav",
         "MAX_HISTORY_TURNS": 6,
         "MAX_RESPONSE_WORDS": 15,
         "AUDIO_VOLUME": 1.0,
@@ -551,12 +551,24 @@ def transcribe_with_whisper(audio_data, config: BMOConfig, whisper_model: Whispe
         return ""
 
 
+def find_wake_word_span(text: str, wake_word: str) -> tuple[int, int] | None:
+    """Finds (start, end) of wake_word or its common Italian phonetic variants in text."""
+    variants = [wake_word]
+    if wake_word == "bmo":
+        variants.extend(["bimo", "bimeo", "bi mo", "b.m.o", "b-mo"])
+    for v in variants:
+        idx = text.find(v)
+        if idx != -1:
+            return idx, idx + len(v)
+    return None
+
+
 def extract_inline_question(text: str, wake_word: str) -> str:
     """Extracts any question spoken immediately after the wake word in the same phrase."""
-    idx = text.find(wake_word)
-    if idx == -1:
+    span = find_wake_word_span(text, wake_word)
+    if span is None:
         return ""
-    after = text[idx + len(wake_word):].strip(" ,.!?:;-'\"")
+    after = text[span[1]:].strip(" ,.!?:;-'\"")
     return after if len(after) >= 3 else ""
 
 
@@ -615,7 +627,7 @@ def voice_listener_worker(
                         try:
                             audio = recognizer.listen(source, timeout=1.0, phrase_time_limit=6)
                             text  = transcribe_with_whisper(audio, config, whisper_model)
-                            if config.WAKE_WORD in text:
+                            if find_wake_word_span(text, config.WAKE_WORD) is not None:
                                 inline_q = extract_inline_question(text, config.WAKE_WORD)
                                 if inline_q:
                                     log.info(f"Wake word + domanda diretta rilevata: {inline_q!r}")
@@ -1023,7 +1035,7 @@ def main() -> None:
         print(f"[FATAL] Errore configurazione: {exc}")
         raise
 
-    os.makedirs("recs", exist_ok=True)
+    os.makedirs(os.path.dirname(config.OUTPUT_WAV) or "assets/recs", exist_ok=True)
 
     # --- Faster-Whisper (#4) ---
     log.info(f"Caricamento Faster-Whisper ({config.WHISPER_MODEL_TYPE}, int8)...")

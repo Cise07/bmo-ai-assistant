@@ -12,7 +12,7 @@ BMO is an advanced interactive voice and text assistant inspired by the characte
 
 | Idle State (`IDLE` + Mic Ready) | Speaking / Happy State (Subtitles + Stop Button) |
 | :---: | :---: |
-| ![BMO UI Idle](./assets/bmo_ui_idle.png) | ![BMO UI Speaking](./assets/bmo_ui_speaking.png) |
+| ![BMO UI Idle](./assets/ui_images/bmo_ui_idle.png) | ![BMO UI Speaking](./assets/ui_images/bmo_ui_speaking.png) |
 
 ## 🚀 Key Features
 
@@ -102,9 +102,9 @@ Piper is kept locally inside the project folder (`./piper/`) and excluded from G
     "PIPER_PATH": "./piper/piper.exe",
     "PIPER_MODEL": "./piper/it_IT-paola-medium.onnx",
     "WHISPER_MODEL_TYPE": "small",
-    "BASE_FACES_PATH": "./faces",
-    "OUTPUT_WAV": "recs/bmo_voice.wav",
-    "TEMP_INPUT_WAV": "recs/temp_audio.wav",
+    "BASE_FACES_PATH": "./assets/faces",
+    "OUTPUT_WAV": "assets/recs/bmo_voice.wav",
+    "TEMP_INPUT_WAV": "assets/recs/temp_audio.wav",
     "MAX_HISTORY_TURNS": 6,
     "MAX_RESPONSE_WORDS": 15,
     "AUDIO_VOLUME": 1.0,
