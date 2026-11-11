@@ -171,6 +171,39 @@ class BMOState:
         self._subtitle_text: str = ""
         self._subtitle_role: str = "bmo"
         self._subtitle_time: float = 0.0
+        self._subtitle_duration: float = 0.0
+        # Real-time audio RMS mouth level (0..5 across 6 progressive mouth frames)
+        self._mouth_level: int = 0
+        self._is_speaking: bool = False
+        self._gui_ready = threading.Event()
+
+    def mark_gui_ready(self) -> None:
+        self._gui_ready.set()
+
+    def wait_gui_ready(self, timeout: float = 10.0) -> None:
+        self._gui_ready.wait(timeout=timeout)
+
+    # --- active TTS speaking flag ---
+    @property
+    def is_speaking(self) -> bool:
+        with self._lock:
+            return self._is_speaking
+
+    @is_speaking.setter
+    def is_speaking(self, value: bool) -> None:
+        with self._lock:
+            self._is_speaking = value
+
+    # --- mouth level for real-time lip-sync ---
+    @property
+    def mouth_level(self) -> int:
+        with self._lock:
+            return self._mouth_level
+
+    @mouth_level.setter
+    def mouth_level(self, value: int) -> None:
+        with self._lock:
+            self._mouth_level = value
 
     # --- current state ---
     @property
@@ -224,15 +257,21 @@ class BMOState:
         log.info("Cronologia conversazione azzerata.")
 
     # --- retro subtitle overlay ---
-    def set_subtitle(self, text: str, role: str = "bmo") -> None:
+    def set_subtitle(self, text: str, role: str = "bmo", duration: float = 0.0) -> None:
         with self._lock:
             self._subtitle_text = text.strip()
             self._subtitle_role = role
             self._subtitle_time = time.time()
+            self._subtitle_duration = duration
 
-    def get_subtitle(self) -> tuple[str, str, float]:
+    def get_subtitle(self) -> tuple[str, str, float, float]:
         with self._lock:
-            return self._subtitle_text, self._subtitle_role, self._subtitle_time
+            return (
+                self._subtitle_text,
+                self._subtitle_role,
+                self._subtitle_time,
+                self._subtitle_duration,
+            )
 
 
 # ===========================================================================
@@ -423,10 +462,8 @@ def speak_with_piper(
         return
 
     log.debug(f"BMO pronuncia: {text!r}")
-    state.set_subtitle(text, role="bmo")
     state.clear_stop_speaking()
     previous_state = state.state
-    state.state = face_state
 
     command = [
         config.PIPER_PATH,
@@ -438,7 +475,6 @@ def speak_with_piper(
         if pygame.mixer.get_init():
             pygame.mixer.music.stop()
             pygame.mixer.music.unload()
-            pygame.mixer.quit()
 
         if os.path.exists(config.OUTPUT_WAV):
             os.remove(config.OUTPUT_WAV)
@@ -456,17 +492,22 @@ def speak_with_piper(
             state.state = previous_state
             return
 
-        pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=4096)
+        if not pygame.mixer.get_init():
+            pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=512)
         pygame.mixer.music.set_volume(min(1.0, max(0.0, config.AUDIO_VOLUME)))
         pygame.mixer.music.load(config.OUTPUT_WAV)
         pygame.mixer.music.play()
+
+        state.is_speaking = True
+        state.state = face_state
+        state.set_subtitle(text, role="bmo")
 
         while pygame.mixer.music.get_busy():
             if state.should_stop_speaking():          # (#14)
                 pygame.mixer.music.stop()
                 log.info("TTS interrotto.")
                 break
-            pygame.time.Clock().tick(20)
+            pygame.time.Clock().tick(60)
 
     except FileNotFoundError:
         log.error(f"Piper non trovato: {config.PIPER_PATH!r}")
@@ -480,8 +521,9 @@ def speak_with_piper(
         log.error(f"Audio error: {exc}")
         state.state = ERROR
         time.sleep(0.8)
-
-    state.state = previous_state
+    finally:
+        state.is_speaking = False
+        state.state = previous_state
 
 
 # ===========================================================================
@@ -550,9 +592,6 @@ def process_question(
     # Express HAPPY when responding to personal/friendly greetings, otherwise SPEAKING
     response_face = HAPPY if intent == "local" else SPEAKING
     speak_with_piper(answer, state, config, face_state=response_face)
-
-    # Brief happy expression after answering before follow-up prompt
-    state.state = HAPPY
     speak_with_piper("Se hai altre domande chiamami pure", state, config, face_state=HAPPY)
 
 
@@ -702,8 +741,8 @@ def draw_subtitle_overlay(
     font_sub: pygame.font.Font,
     font_tag: pygame.font.Font,
 ) -> None:
-    """Draws a retro speech bubble overlay on the bottom of BMO's screen with typewriter effect."""
-    sub_text, sub_role, sub_time = state.get_subtitle()
+    """Draws a retro speech bubble overlay on the bottom of BMO's screen with audio-synced typewriter effect."""
+    sub_text, sub_role, sub_time, sub_duration = state.get_subtitle()
     if not sub_text:
         return
 
@@ -712,8 +751,12 @@ def draw_subtitle_overlay(
     if elapsed > 7.0 and state.state == IDLE and not state.is_busy:
         return
 
-    # Typewriter reveal speed (~32 chars/sec)
-    visible_chars = max(1, int(elapsed * 32))
+    # Sync typewriter speed to actual WAV duration when available
+    if sub_duration > 0.2:
+        progress = min(1.0, elapsed / (sub_duration * 0.92))
+        visible_chars = max(1, int(len(sub_text) * progress))
+    else:
+        visible_chars = max(1, int(elapsed * 32))
     typed_text = sub_text[:visible_chars]
 
     box_rect = pygame.Rect(24, 182, WINDOW_WIDTH - 48, 44)
@@ -774,16 +817,24 @@ def window_thread(
     mic_icons  = create_mic_surfaces()
     log.info("Caricamento animazioni...")
     animations = {s: load_folder_images(path) for s, path in config.FOLDERS.items()}
+    if not pygame.mixer.get_init():
+        try:
+            pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=512)
+        except Exception as exc:
+            log.warning(f"Mixer pre-init warning: {exc}")
 
     frame_index = 0
+    prev_state  = IDLE
     clock = pygame.time.Clock()
+    state.mark_gui_ready()
 
     while True:
         mouse_pos     = pygame.mouse.get_pos()
         mouse_pressed = pygame.mouse.get_pressed()[0]
 
-        cur_state = state.state
-        cur_busy  = state.is_busy
+        cur_state    = state.state
+        cur_busy     = state.is_busy
+        cur_speaking = state.is_speaking
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -802,11 +853,9 @@ def window_thread(
                 if clear_btn_rect.collidepoint(event.pos):
                     state.clear_history()
                     state.set_subtitle("Memoria conversazione azzerata!", role="bmo")
-                    if not cur_busy:
-                        state.state = HAPPY
 
                 if mic_btn_rect.collidepoint(event.pos):
-                    if cur_state in (SPEAKING, HAPPY):
+                    if cur_speaking:
                         state.request_stop_speaking()
                     elif not cur_busy:
                         action_queue.put(("WAKE", None))
@@ -816,7 +865,7 @@ def window_thread(
                 ctrl_pressed = bool(mods & pygame.KMOD_CTRL)
 
                 if event.key == pygame.K_ESCAPE:
-                    if cur_state in (SPEAKING, HAPPY):
+                    if cur_speaking:
                         state.request_stop_speaking()
                 elif ctrl_pressed and event.key == pygame.K_l:
                     state.clear_history()
@@ -852,6 +901,9 @@ def window_thread(
                         cursor_pos += len(event.unicode)
 
         # ── Animation frame ────────────────────────────────────────────────
+        if cur_state != prev_state:
+            frame_index = 0
+            prev_state  = cur_state
         images      = animations.get(cur_state, animations[IDLE])
         frame_index = (frame_index + 1) % (len(images) * 10)
         cur_frame   = min(frame_index // 10, len(images) - 1)
@@ -921,7 +973,7 @@ def window_thread(
                          clear_btn_rect.centery - ct.get_height() // 2 - 1 + cy_off))
 
         # ── Mic / Stop button ──────────────────────────────────────────────
-        is_speaking_now = cur_state == SPEAKING or (cur_state == HAPPY and cur_busy)
+        is_speaking_now = cur_speaking
         if is_speaking_now:
             # (#14) Button becomes STOP
             m_bg     = BTN_MIC_STOP
@@ -1011,6 +1063,7 @@ def main() -> None:
         target=window_thread, args=(action_queue, state, config), daemon=True
     )
     ui_thread.start()
+    state.wait_gui_ready()
 
     # --- Voice listener thread ---
     v_thread = threading.Thread(
