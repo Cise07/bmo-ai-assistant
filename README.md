@@ -8,6 +8,12 @@ BMO is an advanced interactive voice and text assistant inspired by the characte
 > [!IMPORTANT]
 > **Privacy & Local Computing**: All models (AI Intelligence, Speech-to-Text, and Text-to-Speech) run **locally on your machine**. The only exception is the web search function, which activates exclusively to retrieve real-time data or fill information gaps on current topics.
 
+## 🖼️ Interface Preview
+
+| Idle State (`IDLE` + Mic Ready) | Speaking / Happy State (Subtitles + Stop Button) |
+| :---: | :---: |
+| ![BMO UI Idle](./assets/bmo_ui_idle.png) | ![BMO UI Speaking](./assets/bmo_ui_speaking.png) |
+
 ## 🚀 Key Features
 
 - **Local Execution**: Run LLMs, Speech-to-Text, and Text-to-Speech locally without sending audio data to external servers.
