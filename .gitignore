@@ -1,13 +1,15 @@
-# Virtual Environment (includes openai-whisper and all Python packages)
+# Virtual Environment (includes faster-whisper and all Python packages)
 virtual/
 venv/
 env/
 ENV/
 .venv/
 
-# Local Piper TTS installation & voice models
+# Local Piper TTS installation, Faster-Whisper / CTranslate2 & voice models
 piper/
 models/
+models--*/
+.huggingface/
 ollama_models/
 .cache/
 *.onnx

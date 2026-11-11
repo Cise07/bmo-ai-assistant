@@ -1,4 +1,4 @@
-import whisper
+from faster_whisper import WhisperModel
 import ollama
 import speech_recognition as sr
 import subprocess
@@ -8,6 +8,7 @@ import threading
 import queue
 import time
 import logging
+import tkinter as tk
 from datetime import datetime
 from ddgs import DDGS
 import json
@@ -47,20 +48,30 @@ _stream_handler = logging.StreamHandler()
 _stream_handler.setFormatter(ColoredConsoleFormatter(_log_fmt))
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.WARNING,
     handlers=[_file_handler, _stream_handler],
 )
+for _noisy_logger in ("httpx", "httpcore", "urllib3", "primp", "ddgs", "huggingface_hub", "filelock"):
+    logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
+
 log = logging.getLogger("BMO")
+log.setLevel(logging.DEBUG)
 
 
 # ===========================================================================
 # STATES
 # ===========================================================================
-IDLE, LISTENING, THINKING, SPEAKING = "IDLE", "LISTENING", "THINKING", "SPEAKING"
+IDLE      = "IDLE"
+LISTENING = "LISTENING"
+THINKING  = "THINKING"
+SPEAKING  = "SPEAKING"
+HAPPY     = "HAPPY"
+SEARCHING = "SEARCHING"
+ERROR     = "ERROR"
 
 
 # ===========================================================================
-# CONFIGURATION CLASS 
+# CONFIGURATION CLASS
 # ===========================================================================
 class BMOConfig:
     """Loads and exposes all settings from config.json. Read-only after init."""
@@ -82,6 +93,9 @@ class BMOConfig:
             "LISTENING": "listening",
             "THINKING": "thinking",
             "SPEAKING": "speaking",
+            "HAPPY": "happy",
+            "SEARCHING": "searching",
+            "ERROR": "error",
         },
     }
 
@@ -90,7 +104,7 @@ class BMOConfig:
     def __init__(self) -> None:
         data = self._load()
         self.MODEL_OLLAMA: str = data["MODEL_OLLAMA"]
-        self.WAKE_WORD: str = data["WAKE_WORD"]
+        self.WAKE_WORD: str = data["WAKE_WORD"].lower()
         self.PIPER_PATH: str = data["PIPER_PATH"]
         self.PIPER_MODEL: str = data["PIPER_MODEL"]
         self.WHISPER_MODEL_TYPE: str = data["WHISPER_MODEL_TYPE"]
@@ -100,19 +114,22 @@ class BMOConfig:
         self.MAX_HISTORY_TURNS: int = int(data.get("MAX_HISTORY_TURNS", 6))
         self.MAX_RESPONSE_WORDS: int = int(data.get("MAX_RESPONSE_WORDS", 15))
         self.AUDIO_VOLUME: float = float(data.get("AUDIO_VOLUME", 1.0))
-        fn = data["FOLDER_NAMES"]
-        self.FOLDERS: dict[str, str] = {
-            IDLE:     os.path.join(self.BASE_FACES_PATH, fn["IDLE"]),
-            LISTENING: os.path.join(self.BASE_FACES_PATH, fn["LISTENING"]),
-            THINKING:  os.path.join(self.BASE_FACES_PATH, fn["THINKING"]),
-            SPEAKING:  os.path.join(self.BASE_FACES_PATH, fn["SPEAKING"]),
-        }
 
+        default_fn = dict(self._DEFAULTS["FOLDER_NAMES"])
+        default_fn.update(data.get("FOLDER_NAMES", {}))
+        self.FOLDERS: dict[str, str] = {
+            IDLE:      os.path.join(self.BASE_FACES_PATH, default_fn["IDLE"]),
+            LISTENING: os.path.join(self.BASE_FACES_PATH, default_fn["LISTENING"]),
+            THINKING:  os.path.join(self.BASE_FACES_PATH, default_fn["THINKING"]),
+            SPEAKING:  os.path.join(self.BASE_FACES_PATH, default_fn["SPEAKING"]),
+            HAPPY:     os.path.join(self.BASE_FACES_PATH, default_fn["HAPPY"]),
+            SEARCHING: os.path.join(self.BASE_FACES_PATH, default_fn["SEARCHING"]),
+            ERROR:     os.path.join(self.BASE_FACES_PATH, default_fn["ERROR"]),
+        }
 
     # ===========================================================================
     # SYSTEM PROMPT
     # ===========================================================================
-
     @property
     def SYSTEM_PROMPT(self) -> str:
         return (
@@ -137,7 +154,7 @@ class BMOConfig:
 
 
 # ===========================================================================
-# STATE CLASS 
+# STATE CLASS
 # ===========================================================================
 class BMOState:
     """Thread-safe runtime state. All reads/writes go through a Lock."""
@@ -150,6 +167,10 @@ class BMOState:
         self._stop_speaking = threading.Event()
         # Rolling conversation history (#6)
         self._history: list[dict] = []
+        # Retro subtitle overlay state
+        self._subtitle_text: str = ""
+        self._subtitle_role: str = "bmo"
+        self._subtitle_time: float = 0.0
 
     # --- current state ---
     @property
@@ -186,49 +207,68 @@ class BMOState:
 
     # --- conversation history (#6) ---
     def add_to_history(self, role: str, content: str, max_turns: int) -> None:
-        self._history.append({"role": role, "content": content})
-        # Keep only the last max_turns turns (each turn = 1 user + 1 assistant)
-        cap = max_turns * 2
-        if len(self._history) > cap:
-            self._history = self._history[-cap:]
+        with self._lock:
+            self._history.append({"role": role, "content": content})
+            # Keep only the last max_turns turns (each turn = 1 user + 1 assistant)
+            cap = max_turns * 2
+            if len(self._history) > cap:
+                self._history = self._history[-cap:]
 
     def get_history(self) -> list[dict]:
-        return list(self._history)
+        with self._lock:
+            return list(self._history)
 
     def clear_history(self) -> None:
-        self._history.clear()
+        with self._lock:
+            self._history.clear()
+        log.info("Cronologia conversazione azzerata.")
+
+    # --- retro subtitle overlay ---
+    def set_subtitle(self, text: str, role: str = "bmo") -> None:
+        with self._lock:
+            self._subtitle_text = text.strip()
+            self._subtitle_role = role
+            self._subtitle_time = time.time()
+
+    def get_subtitle(self) -> tuple[str, str, float]:
+        with self._lock:
+            return self._subtitle_text, self._subtitle_role, self._subtitle_time
 
 
 # ===========================================================================
 # UI CONSTANTS & COLORS
 # ===========================================================================
-WINDOW_WIDTH  = 400
-WINDOW_HEIGHT = 286
-FACE_HEIGHT   = 240
+WINDOW_WIDTH   = 400
+WINDOW_HEIGHT  = 286
+FACE_HEIGHT    = 240
 CONTROL_HEIGHT = 46
 
 CHASSIS_TEAL = (64, 153, 138)
 CHASSIS_DARK = (32, 85, 76)
 
-INPUT_BG           = (224, 250, 235)
-INPUT_BG_ACTIVE    = (236, 255, 245)
-INPUT_BORDER       = (38, 98, 86)
+INPUT_BG            = (224, 250, 235)
+INPUT_BG_ACTIVE     = (236, 255, 245)
+INPUT_BORDER        = (38, 98, 86)
 INPUT_BORDER_ACTIVE = (18, 62, 54)
-TEXT_COLOR         = (14, 38, 32)
-PLACEHOLDER_COLOR  = (78, 132, 120)
+TEXT_COLOR          = (14, 38, 32)
+PLACEHOLDER_COLOR   = (78, 132, 120)
 
 BTN_SEND_BG     = (38, 56, 64)
 BTN_SEND_HOVER  = (50, 72, 82)
 BTN_SEND_SHADOW = (22, 34, 40)
 BTN_SEND_TEXT   = (245, 255, 250)
 
-BTN_MIC_BG      = (250, 198, 38)
-BTN_MIC_HOVER   = (255, 212, 60)
-BTN_MIC_SHADOW  = (205, 155, 20)
+BTN_CLEAR_BG     = (48, 112, 102)
+BTN_CLEAR_HOVER  = (62, 132, 120)
+BTN_CLEAR_SHADOW = (26, 68, 60)
+
+BTN_MIC_BG       = (250, 198, 38)
+BTN_MIC_HOVER    = (255, 212, 60)
+BTN_MIC_SHADOW   = (205, 155, 20)
 MIC_COLOR_NORMAL = (35, 45, 40)
 
-BTN_MIC_RECORDING   = (235, 68, 68)
-BTN_MIC_REC_SHADOW  = (180, 40, 40)
+BTN_MIC_RECORDING  = (235, 68, 68)
+BTN_MIC_REC_SHADOW = (180, 40, 40)
 
 BTN_MIC_BUSY        = (130, 155, 150)
 BTN_MIC_BUSY_SHADOW = (100, 125, 120)
@@ -236,13 +276,22 @@ BTN_MIC_BUSY_SHADOW = (100, 125, 120)
 BTN_MIC_STOP        = (200, 40, 40)   # dark red → STOP during SPEAKING
 BTN_MIC_STOP_SHADOW = (140, 20, 20)
 
+SUBTITLE_BG_BMO     = (238, 255, 244, 235)
+SUBTITLE_BG_USER    = (255, 250, 218, 235)
+SUBTITLE_BORDER     = (32, 85, 76)
+SUBTITLE_TAG_BMO    = (24, 118, 98)
+SUBTITLE_TAG_USER   = (168, 112, 12)
+
 
 # ===========================================================================
 # WEB SEARCH
 # ===========================================================================
-def bmo_web_search(query: str) -> str:
-    """Queries DuckDuckGo. Returns concatenated body texts or error string."""
+def bmo_web_search(query: str, state: BMOState | None = None) -> str:
+    """Queries DuckDuckGo. Switches state to SEARCHING while querying."""
     log.info(f"Web search: {query!r}")
+    if state is not None:
+        state.state = SEARCHING
+        state.set_subtitle(f"Ricerca sul web: {query}", role="bmo")
     try:
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=3))
@@ -251,11 +300,14 @@ def bmo_web_search(query: str) -> str:
         return "Nessun risultato trovato online."
     except Exception as exc:
         log.error(f"Web search error: {exc}")
+        if state is not None:
+            state.state = ERROR
+            time.sleep(0.8)
         return "Errore di connessione ai circuiti di ricerca."
 
 
 # ===========================================================================
-# INTENT DETECTION 
+# INTENT DETECTION
 # ===========================================================================
 _DATETIME_KW = frozenset([
     "ore", "ora", "orario", "giorno", "data", "oggi", "adesso",
@@ -268,10 +320,11 @@ _WEB_KW = frozenset([
     "dove si trova", "quanto costa", "prezzo", "news",
     "ultimo", "recente", "inventato", "fondato", "creato",
 ])
-# Personal questions -> never web search , always local
+# Personal questions -> never web search, always local
 _LOCAL_KW = frozenset([
     "come stai", "come ti chiami", "chi sei", "cosa sei",
     "ciao", "salve", "buongiorno", "buonasera", "sei bmo",
+    "grazie", "bravo", "ti voglio bene", "amico",
 ])
 
 
@@ -288,10 +341,10 @@ def detect_intent(question: str) -> str:
 
 
 # ===========================================================================
-# CONTEXT BUILDING 
+# CONTEXT BUILDING
 # ===========================================================================
-def build_context(question: str) -> str:
-    """Returns enriched context string, or empty string if not needed."""
+def build_context(question: str, state: BMOState) -> tuple[str, str]:
+    """Returns (enriched context string, detected intent)."""
     intent = detect_intent(question)
     log.debug(f"Intent: {intent!r}")
 
@@ -300,22 +353,26 @@ def build_context(question: str) -> str:
         days = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
         return (
             f"L'orario attuale è {now.strftime('%H:%M')}. "
-            f"Oggi è {days[now.weekday()]} {now.strftime('%d/%m/%Y')}."
+            f"Oggi è {days[now.weekday()]} {now.strftime('%d/%m/%Y')}.",
+            intent,
         )
     if intent == "web":
-        return bmo_web_search(question)
-    return ""
+        return bmo_web_search(question, state), intent
+    return "", intent
+
 
 # ===========================================================================
-# LLM QUERY 
+# LLM QUERY
 # ===========================================================================
 def query_llm(
     question: str,
     context: str,
     state: BMOState,
     config: BMOConfig,
-) -> str:
-    """Builds messages (system + history + question) and queries Ollama."""
+) -> tuple[str, bool]:
+    """Builds messages (system + history + question) and queries Ollama.
+    Returns (answer, had_error).
+    """
     final_prompt = (
         f"CONTESTO: {context}\n\nDOMANDA: {question}" if context else question
     )
@@ -324,41 +381,52 @@ def query_llm(
     messages += state.get_history()
     messages.append({"role": "user", "content": final_prompt})
 
+    state.state = THINKING
     try:
         response = ollama.chat(model=config.MODEL_OLLAMA, messages=messages)
         answer: str = response["message"]["content"]
     except Exception as exc:
         log.error(f"Ollama error: {exc}")
-        return "I miei circuiti hanno avuto un problema. Riprova tra poco."
+        state.state = ERROR
+        return "I miei circuiti hanno avuto un problema. Riprova tra poco.", True
 
     # Fallback: if the model is uncertain
     doubt = {"non so", "mi dispiace", "non conosco", "non sono sicuro", "non ho informazioni"}
     if any(d in answer.lower() for d in doubt) and not context:
         log.info("LLM incerto → fallback web search.")
-        new_ctx = bmo_web_search(question)
+        new_ctx = bmo_web_search(question, state)
         if new_ctx:
+            state.state = THINKING
             messages[-1] = {"role": "user", "content": f"CONTESTO: {new_ctx}\n\nDOMANDA: {question}"}
             try:
                 response = ollama.chat(model=config.MODEL_OLLAMA, messages=messages)
                 answer = response["message"]["content"]
             except Exception as exc:
                 log.error(f"Ollama fallback error: {exc}")
+                state.state = ERROR
+                return answer, True
 
-    return answer
+    return answer, False
 
 
 # ===========================================================================
-# AUDIO — PIPER TTS  
+# AUDIO — PIPER TTS
 # ===========================================================================
-def speak_with_piper(text: str, state: BMOState, config: BMOConfig) -> None:
+def speak_with_piper(
+    text: str,
+    state: BMOState,
+    config: BMOConfig,
+    face_state: str = SPEAKING,
+) -> None:
     """Generates WAV with Piper and plays it. Stops immediately if stop flag set."""
     if not text.strip():
         return
 
     log.debug(f"BMO pronuncia: {text!r}")
+    state.set_subtitle(text, role="bmo")
     state.clear_stop_speaking()
     previous_state = state.state
-    state.state = SPEAKING
+    state.state = face_state
 
     command = [
         config.PIPER_PATH,
@@ -383,6 +451,8 @@ def speak_with_piper(text: str, state: BMOState, config: BMOConfig) -> None:
         )
         if result.returncode != 0:
             log.error(f"Piper exit {result.returncode}: {result.stderr.decode(errors='replace')}")
+            state.state = ERROR
+            time.sleep(0.8)
             state.state = previous_state
             return
 
@@ -400,36 +470,52 @@ def speak_with_piper(text: str, state: BMOState, config: BMOConfig) -> None:
 
     except FileNotFoundError:
         log.error(f"Piper non trovato: {config.PIPER_PATH!r}")
+        state.state = ERROR
+        time.sleep(0.8)
     except subprocess.TimeoutExpired:
         log.error("Piper: timeout generazione audio.")
+        state.state = ERROR
+        time.sleep(0.8)
     except Exception as exc:
         log.error(f"Audio error: {exc}")
+        state.state = ERROR
+        time.sleep(0.8)
 
     state.state = previous_state
 
 
 # ===========================================================================
-# AUDIO — WHISPER STT 
+# AUDIO — FASTER-WHISPER STT
 # ===========================================================================
-def transcribe_with_whisper(audio_data, config: BMOConfig, whisper_model) -> str:
-    """Saves temp WAV and transcribes with Whisper. Returns lowercased text."""
+def transcribe_with_whisper(audio_data, config: BMOConfig, whisper_model: WhisperModel) -> str:
+    """Saves temp WAV and transcribes with faster-whisper. Returns lowercased text."""
     try:
         with open(config.TEMP_INPUT_WAV, "wb") as f:
             f.write(audio_data.get_wav_data())
-        result = whisper_model.transcribe(
+        segments, _ = whisper_model.transcribe(
             config.TEMP_INPUT_WAV,
             language="it",
-            fp16=False,
+            beam_size=5,
             temperature=0.0,
+            vad_filter=True,
             initial_prompt="BMO, robot, bip, Adventure Time",
         )
-        text: str = result["text"].strip().lower()
+        text: str = " ".join(seg.text for seg in segments).strip().lower()
         if text:
             log.debug(f"Whisper → {text!r}")
         return text
     except Exception as exc:
         log.error(f"Trascrizione fallita: {exc}")
         return ""
+
+
+def extract_inline_question(text: str, wake_word: str) -> str:
+    """Extracts any question spoken immediately after the wake word in the same phrase."""
+    idx = text.find(wake_word)
+    if idx == -1:
+        return ""
+    after = text[idx + len(wake_word):].strip(" ,.!?:;-'\"")
+    return after if len(after) >= 3 else ""
 
 
 # ===========================================================================
@@ -439,53 +525,66 @@ def process_question(
     question: str,
     state: BMOState,
     config: BMOConfig,
-    whisper_model,
+    whisper_model: WhisperModel,
 ) -> None:
     """Full pipeline: context → LLM → TTS → history update."""
     log.info(f"Domanda ricevuta: {question!r}")
+    state.set_subtitle(question, role="user")
 
     speak_with_piper("Ci sto pensando", state, config)
     state.state = THINKING
 
-    context = build_context(question)
-    answer  = query_llm(question, context, state, config)
+    context, intent = build_context(question, state)
+    answer, had_error = query_llm(question, context, state, config)
 
     log.info(f"Risposta BMO: {answer!r}")
+
+    if had_error:
+        speak_with_piper(answer, state, config, face_state=ERROR)
+        return
 
     # Update History (#6)
     state.add_to_history("user",      question, config.MAX_HISTORY_TURNS)
     state.add_to_history("assistant", answer,   config.MAX_HISTORY_TURNS)
 
-    speak_with_piper(answer, state, config)
-    speak_with_piper("Se hai altre domande chiamami pure", state, config)
+    # Express HAPPY when responding to personal/friendly greetings, otherwise SPEAKING
+    response_face = HAPPY if intent == "local" else SPEAKING
+    speak_with_piper(answer, state, config, face_state=response_face)
+
+    # Brief happy expression after answering before follow-up prompt
+    state.state = HAPPY
+    speak_with_piper("Se hai altre domande chiamami pure", state, config, face_state=HAPPY)
 
 
 # ===========================================================================
-# VOICE LISTENER 
+# VOICE LISTENER
 # ===========================================================================
 def voice_listener_worker(
     recognizer,
     action_queue: queue.Queue,
     state: BMOState,
     config: BMOConfig,
-    whisper_model,
+    whisper_model: WhisperModel,
 ) -> None:
-    
     log.info("Voice listener avviato.")
     while True:
         if state.state == IDLE and not state.is_busy:
             try:
-                
                 with sr.Microphone() as source:
                     log.debug("Microfono aperto — in ascolto wake word.")
                     while state.state == IDLE and not state.is_busy:
                         try:
-                            audio = recognizer.listen(source, timeout=1.0, phrase_time_limit=4)
+                            audio = recognizer.listen(source, timeout=1.0, phrase_time_limit=6)
                             text  = transcribe_with_whisper(audio, config, whisper_model)
                             if config.WAKE_WORD in text:
-                                log.info("Wake word rilevata!")
-                                action_queue.put(("WAKE", None))
-                                break  
+                                inline_q = extract_inline_question(text, config.WAKE_WORD)
+                                if inline_q:
+                                    log.info(f"Wake word + domanda diretta rilevata: {inline_q!r}")
+                                    action_queue.put(("VOICE_DIRECT", inline_q))
+                                else:
+                                    log.info("Wake word rilevata!")
+                                    action_queue.put(("WAKE", None))
+                                break
                         except sr.WaitTimeoutError:
                             continue
                         except Exception as exc:
@@ -565,6 +664,81 @@ def create_mic_surfaces() -> dict:
     }
 
 
+def get_clipboard_text() -> str:
+    """Reads plain text from the system clipboard via Tkinter."""
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        text = root.clipboard_get()
+        root.destroy()
+        return " ".join(str(text).splitlines())
+    except Exception:
+        return ""
+
+
+def wrap_text_lines(text: str, font: pygame.font.Font, max_width: int, max_lines: int = 2) -> list[str]:
+    """Word-wraps text into at most max_lines lines fitting max_width."""
+    words = text.split()
+    if not words:
+        return []
+    lines: list[str] = []
+    cur = words[0]
+    for w in words[1:]:
+        test = f"{cur} {w}"
+        if font.size(test)[0] <= max_width:
+            cur = test
+        else:
+            lines.append(cur)
+            cur = w
+    lines.append(cur)
+    if len(lines) > max_lines:
+        lines = lines[-max_lines:]
+    return lines
+
+
+def draw_subtitle_overlay(
+    screen: pygame.Surface,
+    state: BMOState,
+    font_sub: pygame.font.Font,
+    font_tag: pygame.font.Font,
+) -> None:
+    """Draws a retro speech bubble overlay on the bottom of BMO's screen with typewriter effect."""
+    sub_text, sub_role, sub_time = state.get_subtitle()
+    if not sub_text:
+        return
+
+    elapsed = time.time() - sub_time
+    # Hide subtitle after 7 seconds if BMO is idle
+    if elapsed > 7.0 and state.state == IDLE and not state.is_busy:
+        return
+
+    # Typewriter reveal speed (~32 chars/sec)
+    visible_chars = max(1, int(elapsed * 32))
+    typed_text = sub_text[:visible_chars]
+
+    box_rect = pygame.Rect(24, 182, WINDOW_WIDTH - 48, 44)
+    tag_label = "BMO:" if sub_role == "bmo" else "TU:"
+    tag_color = SUBTITLE_TAG_BMO if sub_role == "bmo" else SUBTITLE_TAG_USER
+    bg_color  = SUBTITLE_BG_BMO if sub_role == "bmo" else SUBTITLE_BG_USER
+
+    # Semi-transparent pill surface
+    pill = pygame.Surface((box_rect.w, box_rect.h), pygame.SRCALPHA)
+    pygame.draw.rect(pill, bg_color, pill.get_rect(), border_radius=8)
+    pygame.draw.rect(pill, SUBTITLE_BORDER, pill.get_rect(), width=2, border_radius=8)
+    screen.blit(pill, box_rect.topleft)
+
+    tag_surf = font_tag.render(tag_label, True, tag_color)
+    screen.blit(tag_surf, (box_rect.x + 8, box_rect.y + 6))
+
+    text_x = box_rect.x + 12 + tag_surf.get_width()
+    max_text_w = box_rect.w - (text_x - box_rect.x) - 10
+    lines = wrap_text_lines(typed_text, font_sub, max_text_w, max_lines=2)
+
+    for idx, line in enumerate(lines):
+        line_surf = font_sub.render(line, True, TEXT_COLOR)
+        screen.blit(line_surf, (text_x, box_rect.y + 5 + idx * 17))
+
+
 # ===========================================================================
 # GUI THREAD
 # ===========================================================================
@@ -573,7 +747,7 @@ def window_thread(
     state: BMOState,
     config: BMOConfig,
 ) -> None:
-    """Manages Pygame window, animations, and interactive controls."""
+    """Manages Pygame window, animations, subtitles, and interactive controls."""
     pygame.init()
     pygame.font.init()
 
@@ -581,16 +755,20 @@ def window_thread(
     pygame.display.set_caption("BMO INTERFACE")
 
     font_small = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 13)
-    font_btn   = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 12, bold=True)
+    font_sub   = pygame.font.SysFont("Consolas, Segoe UI, sans-serif", 12, bold=True)
+    font_tag   = pygame.font.SysFont("Consolas, Segoe UI, sans-serif", 12, bold=True)
+    font_btn   = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 11, bold=True)
     font_stop  = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 16, bold=True)
 
-    row_y        = 247
-    row_h        = 32
-    input_rect   = pygame.Rect(10,  row_y, 276, row_h)
-    send_btn_rect = pygame.Rect(292, row_y,  56, row_h)
-    mic_btn_rect  = pygame.Rect(354, row_y,  36, row_h)
+    row_y          = 247
+    row_h          = 32
+    input_rect     = pygame.Rect(8,   row_y, 242, row_h)
+    send_btn_rect  = pygame.Rect(255, row_y,  52, row_h)
+    clear_btn_rect = pygame.Rect(312, row_y,  36, row_h)
+    mic_btn_rect   = pygame.Rect(353, row_y,  38, row_h)
 
     input_text   = ""
+    cursor_pos   = 0
     input_active = False
 
     mic_icons  = create_mic_surfaces()
@@ -604,7 +782,6 @@ def window_thread(
         mouse_pos     = pygame.mouse.get_pos()
         mouse_pressed = pygame.mouse.get_pressed()[0]
 
-        
         cur_state = state.state
         cur_busy  = state.is_busy
 
@@ -620,25 +797,59 @@ def window_thread(
                     if input_text.strip() and not cur_busy:
                         action_queue.put(("TEXT", input_text.strip()))
                         input_text = ""
+                        cursor_pos = 0
+
+                if clear_btn_rect.collidepoint(event.pos):
+                    state.clear_history()
+                    state.set_subtitle("Memoria conversazione azzerata!", role="bmo")
+                    if not cur_busy:
+                        state.state = HAPPY
 
                 if mic_btn_rect.collidepoint(event.pos):
-                    if cur_state == SPEAKING:
-                        state.request_stop_speaking()  
+                    if cur_state in (SPEAKING, HAPPY):
+                        state.request_stop_speaking()
                     elif not cur_busy:
                         action_queue.put(("WAKE", None))
 
-            elif event.type == pygame.KEYDOWN and input_active:
-                if event.key == pygame.K_RETURN:
-                    if input_text.strip() and not cur_busy:
-                        action_queue.put(("TEXT", input_text.strip()))
-                        input_text = ""
-                elif event.key == pygame.K_BACKSPACE:
-                    input_text = input_text[:-1]
-                elif event.key == pygame.K_ESCAPE:
-                    if cur_state == SPEAKING:
+            elif event.type == pygame.KEYDOWN:
+                mods = pygame.key.get_mods()
+                ctrl_pressed = bool(mods & pygame.KMOD_CTRL)
+
+                if event.key == pygame.K_ESCAPE:
+                    if cur_state in (SPEAKING, HAPPY):
                         state.request_stop_speaking()
-                elif event.unicode and event.unicode.isprintable():
-                    input_text += event.unicode
+                elif ctrl_pressed and event.key == pygame.K_l:
+                    state.clear_history()
+                    state.set_subtitle("Memoria conversazione azzerata!", role="bmo")
+                elif input_active:
+                    if event.key == pygame.K_RETURN:
+                        if input_text.strip() and not cur_busy:
+                            action_queue.put(("TEXT", input_text.strip()))
+                            input_text = ""
+                            cursor_pos = 0
+                    elif ctrl_pressed and event.key == pygame.K_v:
+                        pasted = get_clipboard_text()
+                        if pasted:
+                            input_text = input_text[:cursor_pos] + pasted + input_text[cursor_pos:]
+                            cursor_pos += len(pasted)
+                    elif event.key == pygame.K_LEFT:
+                        cursor_pos = max(0, cursor_pos - 1)
+                    elif event.key == pygame.K_RIGHT:
+                        cursor_pos = min(len(input_text), cursor_pos + 1)
+                    elif event.key == pygame.K_HOME:
+                        cursor_pos = 0
+                    elif event.key == pygame.K_END:
+                        cursor_pos = len(input_text)
+                    elif event.key == pygame.K_BACKSPACE:
+                        if cursor_pos > 0:
+                            input_text = input_text[:cursor_pos - 1] + input_text[cursor_pos:]
+                            cursor_pos -= 1
+                    elif event.key == pygame.K_DELETE:
+                        if cursor_pos < len(input_text):
+                            input_text = input_text[:cursor_pos] + input_text[cursor_pos + 1:]
+                    elif event.unicode and event.unicode.isprintable() and not ctrl_pressed:
+                        input_text = input_text[:cursor_pos] + event.unicode + input_text[cursor_pos:]
+                        cursor_pos += len(event.unicode)
 
         # ── Animation frame ────────────────────────────────────────────────
         images      = animations.get(cur_state, animations[IDLE])
@@ -648,26 +859,35 @@ def window_thread(
         # ── Background & face ──────────────────────────────────────────────
         screen.fill(CHASSIS_TEAL)
         screen.blit(images[cur_frame], (0, 0))
+        draw_subtitle_overlay(screen, state, font_sub, font_tag)
         pygame.draw.line(screen, CHASSIS_DARK, (0, FACE_HEIGHT), (WINDOW_WIDTH, FACE_HEIGHT), 2)
 
-        # ── Input box ──────────────────────────────────────────────────────
-        ibg     = INPUT_BG_ACTIVE    if input_active else INPUT_BG
+        # ── Input box with cursor navigation ───────────────────────────────
+        ibg     = INPUT_BG_ACTIVE     if input_active else INPUT_BG
         iborder = INPUT_BORDER_ACTIVE if input_active else INPUT_BORDER
         pygame.draw.rect(screen, ibg,     input_rect, border_radius=6)
         pygame.draw.rect(screen, iborder, input_rect, width=2, border_radius=6)
 
         if not input_text and not input_active:
-            ph = font_small.render("Scrivi a BMO e premi Invio...", True, PLACEHOLDER_COLOR)
+            ph = font_small.render("Scrivi a BMO (Ctrl+V incolla)...", True, PLACEHOLDER_COLOR)
             screen.blit(ph, (input_rect.x + 8, input_rect.y + 7))
         else:
-            vis = input_text
+            # Scroll window around cursor_pos so the active cursor is always visible
+            max_w = input_rect.width - 18
+            start_idx = 0
+            while start_idx < cursor_pos and font_small.size(input_text[start_idx:cursor_pos])[0] > max_w - 8:
+                start_idx += 1
+            end_idx = len(input_text)
+            while end_idx > cursor_pos and font_small.size(input_text[start_idx:end_idx])[0] > max_w:
+                end_idx -= 1
+
+            vis = input_text[start_idx:end_idx]
             ts  = font_small.render(vis, True, TEXT_COLOR)
-            while ts.get_width() > input_rect.width - 24 and len(vis) > 1:
-                vis = vis[1:]
-                ts  = font_small.render(vis, True, TEXT_COLOR)
             screen.blit(ts, (input_rect.x + 8, input_rect.y + 7))
+
             if input_active and (pygame.time.get_ticks() // 500) % 2 == 0:
-                cx = input_rect.x + 8 + ts.get_width() + 1
+                prefix_w = font_small.size(input_text[start_idx:cursor_pos])[0]
+                cx = input_rect.x + 8 + prefix_w
                 pygame.draw.line(screen, TEXT_COLOR, (cx, input_rect.y + 7), (cx, input_rect.y + 24), 2)
 
         # ── Send button ────────────────────────────────────────────────────
@@ -685,8 +905,24 @@ def window_thread(
         screen.blit(st, (send_btn_rect.centerx - st.get_width() // 2,
                          send_btn_rect.centery - st.get_height() // 2 - 1 + y_off))
 
+        # ── Clear history button (RESET) ───────────────────────────────────
+        c_hover = clear_btn_rect.collidepoint(mouse_pos)
+        c_down  = c_hover and mouse_pressed
+        c_bg    = BTN_CLEAR_HOVER if c_hover else BTN_CLEAR_BG
+        cy_off  = 1 if c_down else 0
+        pygame.draw.rect(screen, BTN_CLEAR_SHADOW,
+                         pygame.Rect(clear_btn_rect.x, clear_btn_rect.y + 2, clear_btn_rect.w, clear_btn_rect.h),
+                         border_radius=6)
+        pygame.draw.rect(screen, c_bg,
+                         pygame.Rect(clear_btn_rect.x, clear_btn_rect.y + cy_off, clear_btn_rect.w, clear_btn_rect.h - 1),
+                         border_radius=6)
+        ct = font_btn.render("RST", True, BTN_SEND_TEXT)
+        screen.blit(ct, (clear_btn_rect.centerx - ct.get_width() // 2,
+                         clear_btn_rect.centery - ct.get_height() // 2 - 1 + cy_off))
+
         # ── Mic / Stop button ──────────────────────────────────────────────
-        if cur_state == SPEAKING:
+        is_speaking_now = cur_state == SPEAKING or (cur_state == HAPPY and cur_busy)
+        if is_speaking_now:
             # (#14) Button becomes STOP
             m_bg     = BTN_MIC_STOP
             m_shadow = BTN_MIC_STOP_SHADOW
@@ -711,7 +947,7 @@ def window_thread(
                          pygame.Rect(mic_btn_rect.x, mic_btn_rect.y + my_off, mic_btn_rect.w, mic_btn_rect.h - 1),
                          border_radius=6)
 
-        if cur_state == SPEAKING:
+        if is_speaking_now:
             sq = font_stop.render("■", True, (255, 255, 255))
             screen.blit(sq, (mic_btn_rect.centerx - sq.get_width() // 2,
                              mic_btn_rect.centery - sq.get_height() // 2 + my_off))
@@ -737,12 +973,16 @@ def main() -> None:
 
     os.makedirs("recs", exist_ok=True)
 
-    # --- Whisper (#4) ---
-    log.info(f"Caricamento Whisper ({config.WHISPER_MODEL_TYPE})...")
+    # --- Faster-Whisper (#4) ---
+    log.info(f"Caricamento Faster-Whisper ({config.WHISPER_MODEL_TYPE}, int8)...")
     try:
-        whisper_model = whisper.load_model(config.WHISPER_MODEL_TYPE)
+        whisper_model = WhisperModel(
+            config.WHISPER_MODEL_TYPE,
+            device="cpu",
+            compute_type="int8",
+        )
     except Exception as exc:
-        log.critical(f"Impossibile caricare Whisper: {exc}")
+        log.critical(f"Impossibile caricare Faster-Whisper: {exc}")
         raise
 
     # --- Piper sanity check ---
@@ -762,9 +1002,9 @@ def main() -> None:
     action_queue = queue.Queue()
 
     recognizer = sr.Recognizer()
-    recognizer.energy_threshold       = 50
+    recognizer.energy_threshold         = 50
     recognizer.dynamic_energy_threshold = False
-    recognizer.pause_threshold        = 0.8
+    recognizer.pause_threshold          = 0.8
 
     # --- GUI thread ---
     ui_thread = threading.Thread(
@@ -783,7 +1023,7 @@ def main() -> None:
     log.info(f"BMO ONLINE — Dì '{config.WAKE_WORD.upper()}', clicca il microfono o scrivi.")
     speak_with_piper(
         "BMO è ora online, quando sei pronto chiamami, clicca il microfono oppure scrivimi",
-        state, config,
+        state, config, face_state=HAPPY,
     )
 
     # --- Main event loop ---
@@ -794,11 +1034,16 @@ def main() -> None:
         state.is_busy = True
 
         try:
-            if action_type == "WAKE":
+            if action_type == "VOICE_DIRECT":
+                question = str(data)
+                process_question(question, state, config, whisper_model)
+
+            elif action_type == "WAKE":
                 log.info("Wake event ricevuto.")
                 speak_with_piper("Dimmi pure", state, config)
 
                 state.state = LISTENING
+                state.set_subtitle("In ascolto...", role="bmo")
                 log.info("Ascolto domanda...")
                 question = ""
                 try:
@@ -807,9 +1052,14 @@ def main() -> None:
                     question = transcribe_with_whisper(q_audio, config, whisper_model)
                 except sr.WaitTimeoutError:
                     log.info("Timeout — nessuna domanda ricevuta.")
-                    speak_with_piper("Non ho sentito niente. Richiamami quando sei pronto.", state, config)
+                    speak_with_piper(
+                        "Non ho sentito niente. Richiamami quando sei pronto.",
+                        state, config, face_state=ERROR,
+                    )
                 except Exception as exc:
                     log.error(f"Errore ascolto domanda: {exc}")
+                    state.state = ERROR
+                    time.sleep(0.8)
 
                 if len(question) > 1:
                     process_question(question, state, config, whisper_model)
@@ -823,6 +1073,8 @@ def main() -> None:
 
         except Exception as exc:
             log.error(f"Errore elaborazione: {exc}", exc_info=True)
+            state.state = ERROR
+            time.sleep(0.8)
         finally:
             state.state   = IDLE
             state.is_busy = False

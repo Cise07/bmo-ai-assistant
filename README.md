@@ -11,37 +11,62 @@ BMO is an advanced interactive voice and text assistant inspired by the characte
 ## 🚀 Key Features
 
 - **Local Execution**: Run LLMs, Speech-to-Text, and Text-to-Speech locally without sending audio data to external servers.
-- **Dynamic Graphical Interface**: A Pygame window (`400x286`) styled with BMO's retro console bezel, synchronized facial animations (`IDLE`, `LISTENING`, `THINKING`, `SPEAKING`), text input bar, `INVIA` button, and adaptive Mic/Stop button.
-- **Dual Interaction Mode**: Interact by speaking (continuous voice wake-word detection `"bmo"` or clicking the microphone button) or by typing directly into the integrated text input bar.
-- **Interruptible TTS (Stop Button / ESC)**: While BMO is speaking, the microphone button dynamically turns into a red Stop button (`■`); clicking it or pressing `ESC` immediately stops audio playback.
+- **High-Speed Speech Recognition (`faster-whisper`)**: Powered by **Faster-Whisper** (`small`, `int8` quantization + integrated VAD filter) for 3–4x faster Italian transcription and reduced RAM usage.
+- **Inline Wake-Word + Question Detection**: Say `"BMO"` alone to get a prompt (*"Dimmi pure"*), or ask directly in a single breath (e.g., *"BMO che ore sono?"*) to skip the intermediate prompt and get an immediate answer.
+- **Dynamic Graphical Interface & 7 Expressive States**: A Pygame window (`400x286`) styled with BMO's retro console bezel and synchronized facial animations across 7 states:
+  - `IDLE` (sleeping with animated Zzz)
+  - `LISTENING` (attentive listening face)
+  - `THINKING` (pondering with animated `?`)
+  - `SEARCHING` (scanning eyes with animated magnifying glass & radar waves during web searches)
+  - `SPEAKING` (lip-sync animation)
+  - `HAPPY` (joyful `^ ^` eyes, blush, and twinkling sparkles on greetings and completions)
+  - `ERROR` (`X X` eyes and blinking `!` on connection, audio, or timeout errors)
+- **Retro Typewriter Subtitles Overlay**: Displays a semi-transparent retro pill at the bottom of BMO's screen with a typewriter reveal effect showing both user questions (`TU:`) and BMO's spoken responses (`BMO:`).
+- **Enhanced Input Box & Controls**:
+  - Text input supporting **Left/Right/Home/End cursor navigation**, `Delete`/`Backspace`, and **`Ctrl+V` clipboard paste**.
+  - **`INVIA` button** (or `Enter`) to submit text queries.
+  - **`RST` button** (or `Ctrl+L`) to clear rolling conversation memory on the fly.
+  - **Adaptive Mic / Stop (`■`) button** (or `ESC`) to trigger voice listening or immediately interrupt TTS playback while BMO is speaking.
 - **Rolling Conversation Memory**: Maintains a configurable rolling history of recent turns (`MAX_HISTORY_TURNS` in `config.json`) so BMO remembers context across follow-up questions.
 - **Smart Intent Detection & Fallback Web Search**: Classifies queries into `local` (personal/greetings), `datetime` (real-time system clock/date), or `web` (DuckDuckGo search). If the LLM expresses uncertainty on a local query, it automatically triggers a fallback web search.
-- **External JSON Configuration**: All paths, model names, audio volume, history length, and word limits are configurable via `config.json` (automatically generated with default values if missing).
 - **Color-Coded Terminal Logging & File Logs**: Writes complete logs to `logs/bmo.log` and highlights terminal output using ANSI colors (**bright cyan** for BMO's spoken phrases/responses, **bright yellow** for Whisper transcriptions and user inputs).
 
 ## 🛠️ Technology Stack and Libraries
 
 | Library | Model / Purpose | Execution |
 | :--- | :--- | :--- |
-| `openai-whisper` | OpenAI Whisper (`small`) — Speech-to-Text | **Local** |
+| `faster-whisper` | Whisper (`small`, `int8` via CTranslate2) — Speech-to-Text | **Local** |
 | `ollama` | Gemma 3 (`gemma3:4b`) — LLM Brain | **Local** |
 | `piper` | `it_IT-paola-medium` — Neural Text-to-Speech | **Local** (`./piper/`) |
 | `ddgs` | DuckDuckGo Search — Real-time web context | Cloud |
-| `pygame` | Retro GUI & Audio Mixer | **Local** |
+| `pygame` | Retro GUI, Subtitles Overlay & Audio Mixer | **Local** |
 | `SpeechRecognition` + `PyAudio` | Microphone Audio Input Stream | **Local** |
-| `Pillow` | Anti-aliased UI icon rendering | **Local** |
+| `Pillow` | Anti-aliased UI icon rendering & face assets | **Local** |
+
+## ⚙️ How It Works
+
+1. **Monitoring**: In `IDLE` state, `faster-whisper` continuously monitors ambient audio for the **Wake Word** (`"bmo"`).
+2. **Inline or Two-Step Capture**:
+   - If you say *"BMO che tempo fa oggi?"*, BMO extracts the question immediately and starts processing.
+   - If you only say *"BMO"* (or click the Mic button), BMO replies *"Dimmi pure"* and switches to `LISTENING` to record your question.
+3. **Intent & Context Building**:
+   - **Local**: Greetings and personal questions are answered directly with a `HAPPY` expression.
+   - **Date/Time**: Injects the current system time and day of the week in Italian.
+   - **Web Search**: Switches to the `SEARCHING` animation and queries DuckDuckGo for up-to-date context.
+4. **Reasoning & Uncertainty Fallback**: Queries `gemma3:4b` via Ollama with the system prompt, rolling conversation history, and context. If the model replies with uncertainty phrases and no web search was performed yet, BMO automatically switches to `SEARCHING` and re-queries with live web results.
+5. **Synthesized Response & Subtitles**: Piper generates the speech WAV and plays it while the GUI displays the animated face and typewriter subtitles.
 
 ## 📥 Installation & Setup
 
 ### 1. Clone & Python Environment
 ```powershell
-git clone <repo-url>
+git clone <your-repo-url>
 cd BMO-Ai-assistant
 python -m venv virtual
 .\virtual\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
-*(Note: The OpenAI Whisper `small` model is downloaded automatically on first launch via `whisper.load_model("small")`.)*
+*(Note: The Faster-Whisper `small` model is downloaded automatically on first launch via `WhisperModel("small", device="cpu", compute_type="int8")`.)*
 
 ### 2. Install Ollama & LLM Model
 1. Download and install **Ollama** from [https://ollama.com/download](https://ollama.com/download).
@@ -81,7 +106,10 @@ Piper is kept locally inside the project folder (`./piper/`) and excluded from G
         "IDLE": "idle",
         "LISTENING": "listening",
         "THINKING": "thinking",
-        "SPEAKING": "speaking"
+        "SPEAKING": "speaking",
+        "HAPPY": "happy",
+        "SEARCHING": "searching",
+        "ERROR": "error"
     }
 }
 ```
@@ -98,20 +126,20 @@ If Windows does not use your desired microphone by default, run `mic-check.py` t
 .\virtual\Scripts\python.exe mic-check.py
 ```
 
-During execution, logs are saved to `logs/bmo.log` and printed to the terminal with color highlights:
+During execution, logs are saved to `logs/bmo.log` and printed to the terminal with color highlights (verbose HTTP/network debug logs from third-party libraries such as `httpx`, `httpcore`, and `urllib3` are automatically silenced so only clean BMO events and the `Ollama raggiungibile ✓` confirmation appear):
 - **Bright Yellow**: User voice transcriptions (`Whisper → ...`, `Domanda ricevuta: ...`) and text inputs (`Input testuale: ...`).
 - **Bright Cyan**: Everything BMO speaks (`BMO pronuncia: ...`) and generates (`Risposta BMO: ...`).
-- **Standard Output**: State transitions, intent detection, DuckDuckGo searches, and system diagnostics.
+- **Standard Output**: Ollama connectivity check (`Ollama raggiungibile ✓`), state transitions, intent detection, DuckDuckGo search queries, and system diagnostics.
 
 ## 📦 Assets
 
 **All original components:**
 - ✅ **Code**: Written from scratch
-- ✅ **Face Images & Animations**: 100% original custom artwork with retro console frame (`./faces/idle/`, `./faces/listening/`, `./faces/thinking/`, `./faces/speaking/`)
+- ✅ **Face Images & Animations**: 100% original custom artwork with retro console frame across 7 folders (`idle`, `listening`, `thinking`, `speaking`, `happy`, `searching`, `error`)
 - ✅ **Architecture**: Multi-threaded event-driven design (`BMOConfig`, `BMOState`, GUI & Voice workers)
-- ✅ **AI Integration**: Ollama + Gemma 3, Whisper, Piper
+- ✅ **AI Integration**: Ollama + Gemma 3, Faster-Whisper (`int8`), Piper TTS
 - ✅ **Web Search Logic**: Intent classifier + automatic uncertainty fallback
-- ✅ **GUI System**: Custom Pygame implementation with interactive text bar and adaptive Mic/Stop button
+- ✅ **GUI System**: Custom Pygame implementation with typewriter subtitles, cursor-navigable text bar (`Ctrl+V`), history reset (`RST`), and adaptive Mic/Stop button
 
 ### Disclaimer
 > [!IMPORTANT]
@@ -127,7 +155,7 @@ This project is released under the **MIT License**.
 
 | Component | License | Purpose |
 | :--- | :--- | :--- |
-| **OpenAI Whisper** | MIT | Speech-to-Text engine |
+| **Faster-Whisper (CTranslate2)** | MIT | Lightweight Speech-to-Text engine (no PyTorch dependency) |
 | **Ollama** | MIT | LLM runtime and inference |
 | **Gemma 3** | Google Terms | Language model |
 | **Piper TTS** | MIT | Text-to-Speech synthesis |
